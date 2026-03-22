@@ -1,8 +1,16 @@
 # RoboScribe
 
+---
+
 **RoboScribe** is a natural language robotics interface that translates commands into humanoid robot motion inside NVIDIA Isaac Sim. You speak or type "walk in a circle of radius 1 meter" — the system parses it, reads it back to you for voice confirmation, executes the motion on a Unitree H1 humanoid, and captures the full joint trajectory at 200Hz for dataset export. Commands can be issued via **ElevenLabs STT** (speech-to-text) directly from the browser, making the entire interaction hands-free: speak a command, hear the confirmation, say yes, watch the robot move. It also supports visual navigation: say "go to the desk" and an onboard VLM (Qwen3-VL-2B) locates the object from the robot's camera and steers toward it.
 
 ---
+![LangGraph](https://img.shields.io/badge/LangGraph-1C3C3C?style=for-the-badge&logo=langchain&logoColor=white) ![Featherless AI](https://img.shields.io/badge/Featherless_AI-6366F1?style=for-the-badge&logoColor=white) ![NVIDIA Isaac Sim](https://img.shields.io/badge/NVIDIA_Isaac_Sim-76B900?style=for-the-badge&logo=nvidia&logoColor=white) ![Qwen3-VL](https://img.shields.io/badge/Qwen3--VL_2B-FF6A00?style=for-the-badge&logoColor=white) ![n8n](https://img.shields.io/badge/n8n-EA4B71?style=for-the-badge&logo=n8n&logoColor=white) ![ElevenLabs](https://img.shields.io/badge/ElevenLabs-000000?style=for-the-badge&logoColor=white) ![Convex](https://img.shields.io/badge/Convex-EE342F?style=for-the-badge&logoColor=white) ![Cursor](https://img.shields.io/badge/Cursor-1A1A1A?style=for-the-badge&logoColor=white)
+
+[![Demo Video](https://img.youtube.com/vi/UHPUW4HKm2U/maxresdefault.jpg)](https://www.youtube.com/watch?v=UHPUW4HKm2U)
+
+[![Google Slides](https://img.shields.io/badge/Project_Presentation-Google_Slides-FBBC04?style=for-the-badge&logo=googleslides&logoColor=white)](https://docs.google.com/presentation/d/1YQnSkizIurwtHW8--0RxsWLJGZxCUMpo/edit?usp=sharing&ouid=102484345377903726024&rtpof=true&sd=true)
+
 
 ## System Overview
 
