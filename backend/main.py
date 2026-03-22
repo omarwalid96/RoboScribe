@@ -237,6 +237,12 @@ def _export_hdf5() -> StreamingResponse:
                 g.create_dataset("joint_names",
                                  data=np.array(joint_names, dtype=h5py.string_dtype()))
 
+            # Link names (TF tree)
+            link_names = traj.get("link_names", [])
+            if link_names:
+                g.create_dataset("link_names",
+                                 data=np.array(link_names, dtype=h5py.string_dtype()))
+
             # Validation metrics as a sub-group
             val = traj.get("validation") or {}
             if val:
@@ -262,6 +268,35 @@ def _export_hdf5() -> StreamingResponse:
                 fg.create_dataset("linear_velocity",  data=_stack("linear_velocity", 3))
                 fg.create_dataset("angular_velocity", data=_stack("angular_velocity", 3))
                 fg.create_dataset("commands",         data=_stack("command", 3))
+
+                # TF tree — ROS2 TransformStamped format.
+                # Stored as one sub-group per link: translation [F,3], rotation [F,4].
+                # Each group has a "parent_frame" attribute matching frame_id.
+                if link_names and frames and frames[0].get("tf"):
+                    tf_group = fg.create_group("tf")
+                    # Build per-link arrays across all frames
+                    link_translations = {ln: [] for ln in link_names}
+                    link_rotations    = {ln: [] for ln in link_names}
+                    link_parents      = {}
+                    for fr in frames:
+                        tf_map = {entry["child_frame_id"]: entry for entry in fr.get("tf", [])}
+                        for ln in link_names:
+                            if ln in tf_map:
+                                t = tf_map[ln]["transform"]["translation"]
+                                r = tf_map[ln]["transform"]["rotation"]
+                                link_translations[ln].append([t["x"], t["y"], t["z"]])
+                                link_rotations[ln].append([r["w"], r["x"], r["y"], r["z"]])
+                                link_parents[ln] = tf_map[ln]["header"]["frame_id"]
+                            else:
+                                link_translations[ln].append([0.0, 0.0, 0.0])
+                                link_rotations[ln].append([1.0, 0.0, 0.0, 0.0])
+                    for ln in link_names:
+                        lg = tf_group.create_group(ln)
+                        lg.attrs["parent_frame"] = link_parents.get(ln, "unknown")
+                        lg.create_dataset("translation",
+                                          data=np.array(link_translations[ln], dtype=np.float32))
+                        lg.create_dataset("rotation",
+                                          data=np.array(link_rotations[ln], dtype=np.float32))
 
     buf.seek(0)
     return StreamingResponse(

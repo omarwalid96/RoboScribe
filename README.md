@@ -152,6 +152,38 @@ User types command
 
 ---
 
+### 7. Trajectory Data Schema
+
+Every executed command produces a synchronized trajectory recorded at **200Hz**. Each timestep contains:
+
+```
+TIMESTAMP 0.000s
+  joint_positions    [19 values, rad]       — full H1 joint state
+  joint_velocities   [19 values, rad/s]     — joint velocity
+  base_position      [x, y, z]              — world-frame position
+  base_orientation   [qx, qy, qz, qw]       — world-frame quaternion
+  base_transform     4×4 TF matrix          — complete SE(3) transform
+  velocity_command   [vx, vy, wz]           — command applied this step
+  language_label     "walk forward 1m"      — NL instruction (per trajectory)
+  outcome            success / fail          — execution result
+  accuracy           0–100%                 — distance achieved vs. commanded
+
+TIMESTAMP 0.005s  (repeats at 200Hz for the full duration)
+  ...
+```
+
+The **base_transform** (SE(3) TF matrix) is collected alongside the quaternion, giving full 6-DoF pose in a format directly consumable by robot learning frameworks.
+
+**Sample Convex database record:**
+
+![Convex Database Sample](ConvexDatabase.png)
+
+**Same data visualised in Foxglove Studio (joint states + base pose over time):**
+
+![Foxglove Data View](FoxgloveDataView.png)
+
+---
+
 ## n8n Observability Workflow
 
 The backend posts JSON events to an n8n webhook after each command execution. The n8n workflow routes alerts to different Discord channels based on event severity:
@@ -170,6 +202,10 @@ graph LR
 - **Output 2** — errors / low-accuracy executions (triggers `LOW_ACCURACY_ALERT_URL`)
 
 Set `N8N_WEBHOOK_URL` in `.env` to activate. All three outputs post to the RoboScribe [Discord channel](https://discord.com/channels/1485088596846317720/1485088597735375070) via the built-in Discord node (`send: message`).
+
+**Sample alerts in Discord** — each command posts its type, duration, command ID, and execution result including accuracy, distance achieved, and heading drift:
+
+![Sample Discord Messages](SampleDiscordMessages.png)
 
 ---
 
@@ -192,6 +228,60 @@ All messages are flat JSON with a `type` field (no envelope wrapper).
 | `status` | Robot idle/executing/error |
 
 **Isaac Sim (`/sim`) receives:** `execute`, `stop`
+
+---
+
+## VLA Model Compatibility
+
+RoboScribe is designed from the ground up to produce training data for Vision-Language-Action models. The trajectory schema it collects today is **the exact input format** expected by leading VLA frameworks:
+
+| Model | Organisation | Input modalities | RoboScribe provides |
+|-------|-------------|-----------------|---------------------|
+| **GR00T N1 / N1.6** | NVIDIA | Language + proprioception + vision | ✅ joints · pose · command · (🔜 camera) |
+| **pi0 / pi0.5** | Physical Intelligence | Language + proprioception + vision | ✅ joints · pose · command · (🔜 camera) |
+| **OpenVLA** | Stanford | Language + vision + actions | ✅ command labels · (🔜 camera frames) |
+| **Isaac Lab RL policies** | NVIDIA | Proprioception + actions | ✅ full joint state at 200Hz |
+
+**What RoboScribe generates per session:**
+
+```
+joint_positions    [19 values, rad]      200Hz  ✅
+joint_velocities   [19 values, rad/s]    200Hz  ✅
+base_position      [x, y, z]             200Hz  ✅
+base_orientation   [qx, qy, qz, qw]      200Hz  ✅
+base_transform     SE(3) TF matrix        200Hz  ✅
+velocity_command   [vx, vy, wz]          200Hz  ✅
+language_label     "walk forward 1m"     per trajectory  ✅
+outcome            success / fail         per trajectory  ✅
+camera_frame       [640×480 RGB]         synced at 200Hz  🔜
+```
+
+**Policy validation layer:** The Qwen3-VL VLM sees the same scene as the robot and independently generates expected velocity commands. RoboScribe compares these against what `H1FlatTerrainPolicy` actually executed — flagging silent divergences that unit tests would miss.
+
+---
+
+## Roadmap — Full Multimodal Sync
+
+The current build collects complete proprioceptive + language data. The next step closes the camera sync gap:
+
+```
+CURRENT                              NEXT
+─────────────────────────────────    ─────────────────────────────────────
+✅ NL → velocity command             🔜 camera_frame [640×480 RGB] synced
+✅ joint positions + velocities           at the same 200Hz timestamp
+   at 200Hz
+✅ base pose (position + quaternion)  timestep_0042: {
+✅ SE(3) TF transform                   t: 0.210s,
+✅ command label per timestep           joint_positions: [...19...],
+✅ success / fail outcome               joint_velocities: [...19...],
+✅ VLM validation (Qwen3-VL)            base_transform: {pos, quat, tf},
+                                        camera_frame: [640×480 RGB],  ← THIS
+                                        velocity_command: [0.75, 0.0, 0.0],
+                                        language_instruction: "walk forward"
+                                      }
+```
+
+With camera frames synchronized, every RoboScribe session becomes a **ready-to-train multimodal robot dataset** for GR00T N1.6, pi0, and OpenVLA — with zero additional annotation required.
 
 ---
 

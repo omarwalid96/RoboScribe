@@ -35,6 +35,49 @@ JOINT_NAMES = [
     "right_shoulder_pitch", "right_shoulder_roll", "right_shoulder_yaw", "right_elbow",
 ]
 
+# All rigid body links in the H1 kinematic chain (USD prim name under /World/H1/)
+ROBOT_PRIM_BASE = "/World/H1"
+LINK_NAMES = [
+    "pelvis",
+    "left_hip_yaw_link", "left_hip_roll_link", "left_hip_pitch_link",
+    "left_knee_link", "left_ankle_link", "left_foot_link",
+    "right_hip_yaw_link", "right_hip_roll_link", "right_hip_pitch_link",
+    "right_knee_link", "right_ankle_link", "right_foot_link",
+    "torso_link",
+    "left_shoulder_pitch_link", "left_shoulder_roll_link",
+    "left_shoulder_yaw_link", "left_elbow_link",
+    "right_shoulder_pitch_link", "right_shoulder_roll_link",
+    "right_shoulder_yaw_link", "right_elbow_link",
+]
+
+# H1 kinematic tree — child_frame → parent_frame (mirrors the URDF/USD hierarchy).
+# pelvis is the root link; its parent is "world".
+# Used to produce ROS2-compatible TransformStamped entries (local transforms).
+TF_PARENT_MAP = {
+    "pelvis":                   "odom",   # odom → pelvis (world pose from Isaac Sim)
+    "left_hip_yaw_link":        "pelvis",
+    "left_hip_roll_link":       "left_hip_yaw_link",
+    "left_hip_pitch_link":      "left_hip_roll_link",
+    "left_knee_link":           "left_hip_pitch_link",
+    "left_ankle_link":          "left_knee_link",
+    "left_foot_link":           "left_ankle_link",
+    "right_hip_yaw_link":       "pelvis",
+    "right_hip_roll_link":      "right_hip_yaw_link",
+    "right_hip_pitch_link":     "right_hip_roll_link",
+    "right_knee_link":          "right_hip_pitch_link",
+    "right_ankle_link":         "right_knee_link",
+    "right_foot_link":          "right_ankle_link",
+    "torso_link":               "pelvis",
+    "left_shoulder_pitch_link": "torso_link",
+    "left_shoulder_roll_link":  "left_shoulder_pitch_link",
+    "left_shoulder_yaw_link":   "left_shoulder_roll_link",
+    "left_elbow_link":          "left_shoulder_yaw_link",
+    "right_shoulder_pitch_link":"torso_link",
+    "right_shoulder_roll_link": "right_shoulder_pitch_link",
+    "right_shoulder_yaw_link":  "right_shoulder_roll_link",
+    "right_elbow_link":         "right_shoulder_yaw_link",
+}
+
 
 class RoboScribeBridge:
     """
@@ -71,6 +114,9 @@ class RoboScribeBridge:
         self._steps_plan = []    # [{total_steps, vx, vy, wz}, ...] — empty for single commands
         self._step_index = 0     # which step we're currently executing
         self._step_boundary = 0  # _current_step value at which to advance to next step
+
+        # TF tree — XFormPrim objects initialized lazily on first execute
+        self._link_prims = None   # None = not yet attempted; [] = failed/no prims found
 
         # Live update throttling
         self._last_joint_update_time = 0.0
@@ -154,6 +200,10 @@ class RoboScribeBridge:
                 "linear_velocity": linear_vel,
                 "angular_velocity": angular_vel,
                 "command": self._get_command().tolist() if hasattr(self._get_command(), "tolist") else list(self._get_command()),
+                "tf": self._collect_tf_tree(
+                    round(self._current_step * PHYSICS_DT, 4),
+                    base_pos, base_ori,
+                ),
             })
 
             # Progress update every 20 steps
@@ -235,6 +285,133 @@ class RoboScribeBridge:
 
     # ─── Internal helpers ───────────────────────────────────────────────────
 
+    def _init_link_prims(self):
+        """Initialize XFormPrim handles for each H1 link. Called once on first execute."""
+        if self._link_prims is not None:
+            return
+        try:
+            from isaacsim.core.prims import XFormPrim
+            prims = []
+            for name in LINK_NAMES:
+                path = f"{ROBOT_PRIM_BASE}/{name}"
+                try:
+                    prims.append((name, XFormPrim(path)))
+                except Exception:
+                    pass  # link not found in this USD — skip silently
+            self._link_prims = prims
+            print(f"[RoboScribe Bridge] TF tree: {len(prims)}/{len(LINK_NAMES)} links found")
+        except Exception as e:
+            print(f"[RoboScribe Bridge] TF tree init failed: {e}")
+            self._link_prims = []
+
+    @staticmethod
+    def _relative_transform(p_child, q_child, p_parent, q_parent):
+        """
+        Compute the pose of child expressed in the parent's frame.
+
+        All quaternions in Isaac Sim [w, x, y, z] convention.
+        Returns (translation_list, quaternion_list) both as plain Python lists.
+
+        Math:
+            p_rel = R_parent^T @ (p_child - p_parent)
+            q_rel = q_parent_conj ⊗ q_child
+        """
+        p_c = np.array(p_child, dtype=np.float64)
+        p_p = np.array(p_parent, dtype=np.float64)
+        w, x, y, z = float(q_parent[0]), float(q_parent[1]), float(q_parent[2]), float(q_parent[3])
+
+        # Rotation matrix of parent (world→parent)
+        R = np.array([
+            [1 - 2*(y*y + z*z),   2*(x*y - w*z),       2*(x*z + w*y)],
+            [2*(x*y + w*z),        1 - 2*(x*x + z*z),   2*(y*z - w*x)],
+            [2*(x*z - w*y),        2*(y*z + w*x),        1 - 2*(x*x + y*y)],
+        ])
+        p_rel = R.T @ (p_c - p_p)  # R^T = R_inv for rotation matrix
+
+        # Relative rotation: q_parent_conj ⊗ q_child
+        wc = float(q_child[0]); xc = float(q_child[1])
+        yc = float(q_child[2]); zc = float(q_child[3])
+        q_rel = np.array([
+             w*wc + x*xc + y*yc + z*zc,
+             w*xc - x*wc - y*zc + z*yc,
+             w*yc + x*zc - y*wc - z*xc,
+             w*zc - x*yc + y*xc - z*wc,
+        ])
+        # Normalise to avoid drift
+        q_rel /= np.linalg.norm(q_rel) + 1e-12
+
+        return p_rel.tolist(), q_rel.tolist()
+
+    def _collect_tf_tree(self, stamp: float, base_pos: list, base_ori: list) -> list:
+        """
+        Return a ROS2-compatible list of TransformStamped-like dicts with TRUE
+        parent-relative local transforms.
+
+        Strategy:
+          1. Collect world pose for every link via get_world_poses().
+          2. For each child link, compute T_local = T_parent_world_inv ⊗ T_child_world.
+          3. pelvis world pose comes from base_pos/base_ori (already collected reliably).
+        """
+        # world → odom: identity anchor (perfect odometry in simulation)
+        transforms = [{
+            "header": {"stamp": stamp, "frame_id": "world"},
+            "child_frame_id": "odom",
+            "transform": {
+                "translation": {"x": 0.0, "y": 0.0, "z": 0.0},
+                "rotation":    {"w": 1.0, "x": 0.0, "y": 0.0, "z": 0.0},
+            },
+        }]
+
+        # odom → pelvis: world pose from articulation (reliable, no XFormPrim)
+        transforms.append({
+            "header": {"stamp": stamp, "frame_id": "odom"},
+            "child_frame_id": "pelvis",
+            "transform": {
+                "translation": {"x": float(base_pos[0]), "y": float(base_pos[1]), "z": float(base_pos[2])},
+                "rotation":    {"w": float(base_ori[0]), "x": float(base_ori[1]),
+                                "y": float(base_ori[2]), "z": float(base_ori[3])},
+            },
+        })
+
+        if not self._link_prims:
+            return transforms
+
+        # Build world-pose cache — seed with known poses
+        world_poses = {
+            "odom":   ([0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0]),
+            "pelvis": (list(base_pos), list(base_ori)),
+        }
+
+        for name, prim in self._link_prims:
+            if name == "pelvis":
+                continue
+            parent = TF_PARENT_MAP.get(name, "pelvis")
+            try:
+                pos_w, ori_w = prim.get_world_poses()
+                pos_w = pos_w[0].tolist()
+                ori_w = ori_w[0].tolist()  # [w, x, y, z]
+                world_poses[name] = (pos_w, ori_w)
+
+                if parent not in world_poses:
+                    # Parent world pose not yet known — fall back to world frame
+                    p_rel, q_rel = pos_w, ori_w
+                else:
+                    p_parent, q_parent = world_poses[parent]
+                    p_rel, q_rel = self._relative_transform(pos_w, ori_w, p_parent, q_parent)
+
+                transforms.append({
+                    "header": {"stamp": stamp, "frame_id": parent},
+                    "child_frame_id": name,
+                    "transform": {
+                        "translation": {"x": float(p_rel[0]), "y": float(p_rel[1]), "z": float(p_rel[2])},
+                        "rotation":    {"w": float(q_rel[0]), "x": float(q_rel[1]),
+                                        "y": float(q_rel[2]), "z": float(q_rel[3])},
+                    },
+                })
+            except Exception:
+                pass
+        return transforms
+
     def _compute_distance(self, current_pos):
         if self._start_position is None:
             return 0.0
@@ -253,6 +430,7 @@ class RoboScribeBridge:
             "total_duration": round(self._current_step * PHYSICS_DT, 4),
             "distance_traveled": round(dist, 4),
             "joint_names": JOINT_NAMES,
+            "link_names": LINK_NAMES,
             "trajectory": self._trajectory,
         }
         self._send_nowait(payload)
@@ -421,6 +599,9 @@ class RoboScribeBridge:
                 self._set_command([vx, vy, wz])
                 print(f"[RoboScribe Bridge] Execute: id={command_id} vx={vx} vy={vy} wz={wz} "
                       f"duration={duration}s ({self._total_steps} steps)")
+
+            # Initialize TF link prims on first execute (no-op after first call)
+            self._init_link_prims()
 
             # Reset execution state
             self._command_id = command_id

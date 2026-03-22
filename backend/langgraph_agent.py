@@ -704,8 +704,9 @@ class RoboScribeAgent:
         parsed = ctx.get("parsed", {})
         validation = _compute_validation(parsed, result)
 
-        # Full per-frame data from Isaac Sim (200Hz joint + IMU recording)
+        # Full per-frame data from Isaac Sim (200Hz joint + IMU + TF tree recording)
         joint_names = result.get("joint_names", [])
+        link_names = result.get("link_names", [])
         trajectory_frames = result.get("trajectory", [])
 
         metadata = {
@@ -718,8 +719,9 @@ class RoboScribeAgent:
             "duration_seconds": duration,
             "distance_traveled": distance,
             "validation": validation,
-            # Full 200Hz recording — joint positions/velocities + IMU per step
+            # Full 200Hz recording — joint positions/velocities + IMU + TF tree per step
             "joint_names": joint_names,
+            "link_names": link_names,
             "trajectory": trajectory_frames,
         }
 
@@ -727,7 +729,7 @@ class RoboScribeAgent:
         self.trajectories.append(metadata)
         logger.info("[%s] Execution complete — %d trajectories stored (%d frames): %s",
                     command_id, len(self.trajectories), len(trajectory_frames),
-                    {k: v for k, v in metadata.items() if k not in ("trajectory", "joint_names")})
+                    {k: v for k, v in metadata.items() if k not in ("trajectory", "joint_names", "link_names")})
 
         parsed_summary = ""
         if isinstance(parsed, dict):
@@ -765,7 +767,7 @@ class RoboScribeAgent:
         # Persist metadata-only to Convex (frames too large for 1MB document limit)
         if _CONVEX_ENABLED:
             convex_metadata = {k: v for k, v in metadata.items()
-                               if k not in ("trajectory", "joint_names")}
+                               if k not in ("trajectory", "joint_names", "link_names")}
             asyncio.create_task(_convex_save_trajectory(convex_metadata))
 
         await send_to_dashboard({
