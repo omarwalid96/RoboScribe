@@ -1,0 +1,25 @@
+[core]
+reloadable = true
+order = 0
+
+[package]
+version = "0.1.0"
+category = "Simulation"
+title = "RoboScribe H1 Bridge"
+description = "Natural language control bridge for Unitree H1 humanoid"
+authors = ["RoboScribe Team"]
+keywords = ["roboscribe", "h1", "humanoid", "bridge", "websocket"]
+changelog = "docs/CHANGELOG.md"
+
+[dependencies]
+"omni.kit.uiapp" = {}
+"isaacsim.gui.components" = {}
+"isaacsim.core.utils" = {}
+"isaacsim.core.prims" = {}
+"isaacsim.core.api" = {}
+"isaacsim.examples.extension" = {}
+"isaacsim.robot.policy.examples" = {}
+"isaacsim.storage.native" = {}
+
+[[python.module]]
+name = "roboscribe_h1_bridge_python"

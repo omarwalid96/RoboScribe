@@ -1,0 +1,11 @@
+.env
+.env.example
+frontend/.env
+logs/
+backend/__pycache__
+frontend/.agents
+agent_prompts
+.claude
+ACTION_PLAN.md
+CLAUDE.md
+exts/roboscribe.h1.bridge/roboscribe_h1_bridge_python/__pycache__
