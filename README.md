@@ -1,6 +1,6 @@
 # RoboScribe
 
-**RoboScribe** is a natural language robotics interface that translates plain English commands into humanoid robot motion inside NVIDIA Isaac Sim. You type "walk in a circle of radius 1 meter" — the system parses it, reads it back to you for voice confirmation, executes the motion on a Unitree H1 humanoid, and captures the full joint trajectory at 200Hz for dataset export. It also supports visual navigation: say "go to the desk" and an onboard VLM (Qwen3-VL-2B) locates the object from the robot's camera and steers toward it.
+**RoboScribe** is a natural language robotics interface that translates commands into humanoid robot motion inside NVIDIA Isaac Sim. You speak or type "walk in a circle of radius 1 meter" — the system parses it, reads it back to you for voice confirmation, executes the motion on a Unitree H1 humanoid, and captures the full joint trajectory at 200Hz for dataset export. Commands can be issued via **ElevenLabs STT** (speech-to-text) directly from the browser, making the entire interaction hands-free: speak a command, hear the confirmation, say yes, watch the robot move. It also supports visual navigation: say "go to the desk" and an onboard VLM (Qwen3-VL-2B) locates the object from the robot's camera and steers toward it.
 
 ---
 
@@ -81,7 +81,7 @@ A React 19 / Next.js 16 / Tailwind 4 single-page app. All command flow is **WebS
 - `lib/api-client.ts` — `robotWebSocket` singleton (auto-reconnects). `robotApi.sendCommand()` and `robotApi.confirmCommand()` both send WS messages. Handles LAN IP substitution so the dashboard works when opened from a different host than localhost.
 - `context/robot-context.tsx` — `RobotProvider` is the single source of truth. Handles all 10+ incoming WS message types and updates state: `pendingCommand`, `robotStatus`, `executionProgress`, `trajectories`, `stats`, `navigationState`. Also wires the Convex `recordings.save` mutation via `saveRecordingRef`.
 - `hooks/use-robot-state.ts` — Thin hook that reads from context. Import this in components, not the context directly.
-- `components/command-panel.tsx` — The main user interaction surface: text input → confirmation dialog with ElevenLabs TTS (falls back to browser `speechSynthesis`) → execution progress bar.
+- `components/command-panel.tsx` — The main user interaction surface: voice input via **ElevenLabs STT** or keyboard text → confirmation dialog with **ElevenLabs TTS** (falls back to browser `speechSynthesis`) → execution progress bar. The full interaction loop is hands-free: speak → hear confirmation → say yes → robot moves.
 - `components/dataset-panel.tsx` — Dataset recording controls and trajectory table.
 - `components/realtime-chart.tsx` / `joint-monitor.tsx` / `joint-data-stream.tsx` — Live joint telemetry display (positions + velocities in degrees/deg-s, streamed from 20Hz `joint_update` messages).
 - `components/stats-bar.tsx` — Live stats from `stats_update` WS messages (total trajectories, success rate, timesteps, unique commands).
@@ -404,7 +404,8 @@ CONVEX_SITE_URL=https://your-deployment.convex.site
 N8N_WEBHOOK_URL=...
 LOW_ACCURACY_ALERT_URL=...   # Discord/Slack/generic webhook
 
-# Frontend TTS (falls back to browser speechSynthesis if unset)
+# ElevenLabs STT (speech-to-text input) + TTS (voice confirmation output)
+# Falls back to browser speechSynthesis for TTS if unset
 NEXT_PUBLIC_ELEVENLABS_API_KEY=...
 NEXT_PUBLIC_ELEVENLABS_VOICE_ID=...
 
