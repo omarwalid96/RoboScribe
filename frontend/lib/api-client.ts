@@ -595,4 +595,36 @@ export const voiceApi = {
 
     return response.arrayBuffer();
   },
+
+  async transcribe(audioBlob: Blob): Promise<string> {
+    const ELEVENLABS_API_KEY = process.env.NEXT_PUBLIC_ELEVENLABS_API_KEY;
+    if (!ELEVENLABS_API_KEY) {
+      console.warn('[Voice] ElevenLabs API key not configured for transcription');
+      throw new Error('Voice API not configured');
+    }
+
+    const formData = new FormData();
+    formData.append('file', audioBlob, 'record.webm');
+    formData.append('model_id', 'scribe_v1'); // Or scribe_v2 if available
+
+    const response = await fetch(
+      'https://api.elevenlabs.io/v1/speech-to-text',
+      {
+        method: 'POST',
+        headers: {
+          'xi-api-key': ELEVENLABS_API_KEY,
+        },
+        body: formData,
+      }
+    );
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      console.error('[Voice] Transcription failed:', errorData);
+      throw new Error(`Transcription API error: ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    return data.text || '';
+  },
 };
